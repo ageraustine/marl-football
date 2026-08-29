@@ -1,271 +1,321 @@
-# MARL Football ⚽
+# MARL Football
 
-A multi-agent reinforcement learning project simulating full **11v11 football**,
-built on **PettingZoo** + **Gymnasium** for the environment API, **RLlib** for
-multi-agent training, and **raylib** for real-time, high-quality 2D rendering.
-
-Two teams of 11 learn to move, pass, and shoot from scratch through
-self-play — no scripted behavior, no hand-coded tactics. What you see on
-screen is entirely emergent from reward signals and curriculum training.
+A multi-agent reinforcement learning environment and training pipeline for
+11-a-side football. Built on PettingZoo, Gymnasium, RLlib, and raylib.
 
 ![gameplay demo](assets/demo.gif)
 
-*5 seconds of live raylib rendering — smooth motion, possession rings,
-direction indicators, and a scoreboard. Regenerate this clip yourself
-with `python -m scripts.record_demo` (see "Recording a demo GIF" below).*
+## Contents
 
----
+1. [Overview](#overview)
+2. [Installation](#installation)
+3. [Quick Start](#quick-start)
+4. [Rules of Play](#rules-of-play)
+5. [Environment Specification](#environment-specification)
+6. [Rendering](#rendering)
+7. [Training](#training)
+8. [Project Structure](#project-structure)
+9. [Testing](#testing)
+10. [Limitations](#limitations)
+11. [Roadmap](#roadmap)
 
-## Why this project is interesting
+## Overview
 
-Full 11v11 is the hard version of this problem. With 22 agents and a
-sparse goal reward, naive independent training almost never converges to
-anything watchable — credit assignment across ~90 decisions per agent
-per episode, with a reward that only fires when *someone* scores, is
-brutal. This project's design is built around making that tractable:
+`FootballEnv` simulates a two-team football match on a regulation-size
+pitch. Squad size is configurable from 1v1 up to full 11v11. Each player
+is an independent agent controlled by an external policy through the
+PettingZoo `ParallelEnv` API; the environment itself contains no
+policies or scripted behavior.
 
-- **Parameter sharing**: one policy per team (not 22 separate networks).
-  Every outfield player on Team A runs the *same* network, conditioned on
-  a role embedding, so learning from one player's experience benefits
-  all 11.
-- **Curriculum learning**: train 1v1 → 2v2 → 3v3 → 5v5 → 11v11, carrying
-  policy weights forward at each stage. Going straight to 11v11 is the
-  single most common way projects like this stall out.
-- **Reward shaping that doesn't fight the goal reward**: dense shaping
-  terms (closing down the ball, advancing it upfield) are small relative
-  to the sparse goal reward, so the policy can't "cheat" by farming
-  shaping reward instead of actually trying to score.
-- **A hybrid action space**: continuous movement (for motion that
-  actually looks like football, not a grid-world) plus a small discrete
-  set of kick actions gated by ball possession (for a kicking problem
-  that's actually learnable).
+The project includes:
 
-## Quickstart
+- A physics-based simulation core (`football_env/`) with no rendering
+  or training dependencies, so it can run headless at full speed.
+- A raylib renderer (`render/`) for real-time visualization of a match.
+- An RLlib training pipeline (`training/`) implementing team-level
+  policy sharing and a staged curriculum from 1v1 to 11v11.
+
+## Installation
+
+Requires Python 3.10+.
 
 ```bash
 git clone <this-repo>
 cd marl_football
 pip install -r requirements.txt
+```
 
-# Sanity-check the simulation logic (no raylib/pettingzoo needed for this part)
+`football_env/constants.py`, `physics.py`, `entities.py`,
+`observations.py`, and `rewards.py` depend only on NumPy and can be
+imported and tested without installing PettingZoo, raylib, or Ray.
+
+## Quick Start
+
+```bash
+# Verify the simulation core
 python -m tests.test_physics
 
-# Watch a full 11v11 match with random actions, rendered live in raylib
+# Watch a match with random actions
 python -m scripts.watch_random --team-size 11
 
-# Record a 5-second GIF of it (used for the clip at the top of this README)
+# Record a short GIF of a match
 python -m scripts.record_demo --seconds 5 --team-size 11 --out assets/demo.gif
 
-# Train the full curriculum (1v1 -> 11v11) — this takes hours to days
-# depending on hardware; see "Training" below
+# Train the full curriculum (1v1 -> 11v11)
 python -m training.train
 
-# Watch a trained checkpoint play
-python -m scripts.watch_trained --checkpoint checkpoints/11v11_full/<checkpoint-dir> --team-size 11
+# Watch a trained checkpoint
+python -m scripts.watch_trained --checkpoint checkpoints/11v11_full/<dir> --team-size 11
 ```
 
-## Project structure
+## Rules of Play
 
-```
-football_env/            The simulation — no rendering or training deps
-    constants.py            Pitch geometry, physics tuning, formations, colors
-    formations.py            Kickoff formation builder for any squad size
-    entities.py               Player / Ball dataclasses (plain state, no behavior)
-    physics.py                 Movement, ball dynamics, possession, kicks, goals
-    observations.py            Egocentric, fixed-size observation vector per agent
-    rewards.py                  Sparse goal reward + dense shaping terms
-    environment.py              FootballEnv(pettingzoo.ParallelEnv) — ties it together
+This section describes the ruleset implemented by the simulation. It is
+a simplified subset of the FIFA Laws of the Game; differences from the
+official laws are listed under [Limitations](#limitations).
 
-render/
-    renderer.py               raylib rendering: pitch, players, ball, scoreboard, HUD
+### Pitch
 
-training/
-    curriculum.py             The 1v1 -> 11v11 stage definitions
-    rllib_wrapper.py           PettingZoo -> RLlib MultiAgentEnv adapter, policy mapping
-    train.py                    Curriculum training entrypoint (RLlib MAPPO/PPO)
+| Property | Value |
+|---|---|
+| Length | 105 m |
+| Width | 68 m |
+| Goal width | 7.32 m |
+| Penalty area | 40.32 m x 16.5 m |
+| Center circle radius | 9.15 m |
 
-scripts/
-    watch_random.py           Render a match with random actions (no training needed)
-    watch_trained.py           Load a checkpoint and render it playing
-    record_demo.py              Capture N seconds of raylib rendering to a GIF
+### Teams
 
-assets/
-    demo.gif                  The README's gameplay clip (generated, not hand-made)
+Each side fields between 1 and 11 players, set by the `team_size`
+parameter at environment construction. Team 0 defends the goal at
+`x = -52.5` and attacks toward `x = +52.5`; Team 1 is mirrored. Sides
+are not swapped at any point during a match.
 
-tests/
-    test_physics.py            Fast, dependency-light sanity tests for the sim core
-```
+Players are assigned one of four roles at kickoff: Goalkeeper,
+Defender, Midfielder, or Forward. Roles determine starting position and
+are included in each agent's observation; they do not restrict what
+actions a player can take.
 
-`football_env/` deliberately has **zero dependency on raylib or ray** —
-it only needs `pettingzoo` + `gymnasium` (and `numpy` even without
-those, for the physics core). That's what lets training run headless at
-full speed on a cluster with no display, while `render/renderer.py` is
-only ever imported when you actually want to watch.
+### Match Duration
 
-## Design decisions
+An episode runs for a fixed number of simulated seconds (180s by
+default, configurable via `max_steps`). The simulation steps at 20 Hz.
+A goal does not end the episode -- play resumes immediately from
+kickoff, and the running score is tracked for the remainder of the
+episode.
 
-### Action space
-Each agent's action is a `Dict`:
-- `move`: `Box(2,)` in `[-1, 1]` — direction × intensity. Players
-  *accelerate* towards this target velocity (not teleport to it), which
-  is what makes motion look like a football player and not a
-  twin-stick-shooter character.
-- `kick_type`: `Discrete(4)` — `none / pass / shoot / clear`. Only has
-  any effect if the agent currently has the ball.
-- `kick_dir`: `Box(2,)` — direction for the kick, magnitude ignored
-  (power comes from `kick_type`).
+### Kickoff
 
-This hybrid mirrors how most football-RL research (e.g. Google Research
-Football) structures the problem: continuous locomotion is what needs to
-look and feel natural, while ball actions are a much smaller decision
-that's far easier to learn as a discrete choice than as unconstrained
-continuous kicking.
+At the start of an episode and after every goal:
 
-### Observations
-Egocentric and **fixed-size regardless of squad size** — this is the
-detail that makes curriculum learning work. Every agent sees:
-own state, ball state (relative), both goals (relative), a role
-one-hot, and its `MAX_TEAMMATES` / `MAX_OPPONENTS` nearest teammates and
-opponents sorted by distance and zero-padded when the squad is smaller
-(e.g. during 3v3 training). Because the observation *shape* never
-changes, a policy trained at 3v3 can be dropped straight into a 5v5
-environment as a warm start.
+1. All players return to their formation start positions for the
+   current squad size.
+2. The ball is placed at the center spot.
+3. Possession is awarded to the team that conceded (or to Team 0 at the
+   start of the episode).
 
-### Rewards
-```
-GOAL_REWARD            = +10.0  (shared by every player on the scoring team)
-CONCEDE_PENALTY         = -10.0  (shared by every player on the conceding team)
-BALL_PROXIMITY_WEIGHT   =  +0.01  per meter closed, only when not in possession
-POSSESSION_ADVANCE_WEIGHT = +0.02  per meter the ball advances upfield, in possession
-OUT_OF_BOUNDS_PENALTY   =  -0.05  charged to whoever last touched it
-TIME_PENALTY             = -0.0005 per step, discourages pure stalling
-```
-The shaping terms are intentionally ~100-1000x smaller than the goal
-reward. This is a deliberate anti-reward-hacking choice: a policy that
-just jogs towards the ball forever without ever passing or shooting
-should score *worse* over an episode than one that actually plays, and
-the weights are tuned so that holds.
+### Scoring
 
-### Parameter sharing + self-play
-Both teams train against each other in the same environment
-(`training/rllib_wrapper.py`), with one policy per team
-(`team_0_policy`, `team_1_policy`) shared across all 11 players. This
-is a standard MARL simplification (independent-but-shared-weights PPO,
-sometimes called "parameter-sharing IPPO") that trades off individual
-player specialization for tractability — it's what makes 22-agent
-training feasible on modest hardware. Role information is still fed
-into the observation, so the shared policy *can* learn
-role-conditioned behavior (a striker and a center-back behave very
-differently despite sharing weights).
+A goal is awarded when the ball's position crosses a team's goal line
+(`x = +/-52.5`) within the width of the goal (`|y| <= 3.66`). The
+scoring team's counter increments and kickoff is triggered as described
+above.
 
-### Curriculum
-See `training/curriculum.py`. Each stage restores the previous stage's
-policy checkpoint before continuing training with a larger squad. The
-policy IDs (`team_0_policy` / `team_1_policy`) stay constant across
-every stage specifically so this restore works cleanly.
+### Possession
 
-## Simplifications (scope cuts, on purpose)
+The ball is either **free** or **owned** by exactly one player at any
+time.
 
-This is a portfolio-focused simulation, not a certified football-rules
-engine. Known simplifications, so nothing here is a "bug":
+- A free ball within 0.9 m of a player is automatically collected by
+  the nearest eligible player. A fast-moving ball is proportionally
+  harder to collect (the effective radius shrinks with ball speed).
+- A player in possession carries the ball: it follows just ahead of
+  their movement direction as they run.
+- Possession transfers when the ball is kicked, or when an opposing
+  player collects a loose ball.
 
-- **No offside rule.**
-- **No fouls, cards, or physical contact/tackling** — the ball changes
-  possession purely by proximity (`POSSESSION_RADIUS`), not by a tackle
-  action.
-- **Throw-ins / goal kicks / corners are all one simplified restart**:
-  the ball is clamped just inside the line and handed to whichever team
-  didn't touch it last, with no stoppage or set-piece positioning.
-- **No stamina model** — top speed is constant for the full match.
-- **Half-time side swap is not simulated** — each team defends the same
-  goal for the whole episode.
+### Kicking
 
-All of these are natural "future work" extensions and the codebase is
-structured (see `physics.py` / `environment.py`) so each one can be
-added independently without a rewrite.
+Only the player currently in possession may kick. Three kick types are
+available, each releasing possession and applying a fixed initial
+speed to the ball in a direction chosen by the kicking player:
 
-## Recording a demo GIF
+| Kick type | Speed |
+|---|---|
+| Pass | 12 m/s |
+| Shot | 22 m/s |
+| Clear | 18 m/s |
+
+### Out of Bounds
+
+If the ball crosses a touchline or goal line without a goal being
+scored, it is placed just inside the boundary and possession is
+awarded to the team that did not touch it last. This single rule
+covers throw-ins, corner kicks, and goal kicks; no stoppage or
+set-piece positioning is simulated.
+
+### Movement
+
+Players accelerate toward a commanded direction and speed rather than
+moving instantaneously, subject to a maximum speed (8 m/s for outfield
+players, 7.2 m/s for goalkeepers) and fixed acceleration/deceleration
+limits.
+
+## Environment Specification
+
+### Action Space
+
+Each agent's action is a dictionary:
+
+| Key | Type | Description |
+|---|---|---|
+| `move` | `Box(2,)`, range [-1, 1] | Target movement direction and intensity |
+| `kick_type` | `Discrete(4)` | 0 = none, 1 = pass, 2 = shoot, 3 = clear |
+| `kick_dir` | `Box(2,)`, range [-1, 1] | Kick direction; ignored unless the agent is in possession and `kick_type != 0` |
+
+### Observation Space
+
+Each agent receives a fixed-length `Box(125,)` vector, independent of
+squad size:
+
+| Segment | Size | Contents |
+|---|---|---|
+| Self | 7 | Position, velocity, possession flag, time remaining, team id |
+| Ball | 5 | Relative position, relative velocity, free/owned flag |
+| Goals | 4 | Relative vector to own and opponent goal |
+| Role | 4 | One-hot: GK / DF / MF / FW |
+| Teammates | 50 | 10 nearest teammates x (relative position, relative velocity, mask), distance-sorted, zero-padded |
+| Opponents | 55 | 11 nearest opponents x (relative position, relative velocity, mask), distance-sorted, zero-padded |
+
+Fixed-length, zero-padded teammate/opponent slots allow a policy
+trained on a smaller squad size to be used as a checkpoint for training
+on a larger squad size without a change in network architecture.
+
+### Reward Function
+
+| Term | Value | Applies to |
+|---|---|---|
+| Goal scored | +10.0 | Every player on the scoring team |
+| Goal conceded | -10.0 | Every player on the conceding team |
+| Ball proximity | +0.01 per meter closed | Players not in possession, closing distance to the ball |
+| Possession advance | +0.02 per meter | Team in possession, per meter the ball moves toward the opponent goal |
+| Out of bounds | -0.05 | Players on the team that last touched the ball |
+| Time step | -0.0005 | Every agent, every step |
+
+## Rendering
+
+`render/renderer.py` draws the match state using raylib: pitch
+markings, goal frames, players with team colors and role labels,
+possession indicator, ball, and a scoreboard. Rendering is invoked by
+setting `render_mode="human"` on `FootballEnv` and calling `env.render()`
+after each step; it is not required for training.
+
+To record a clip:
 
 ```bash
 python -m scripts.record_demo --seconds 5 --team-size 11 --out assets/demo.gif
 ```
 
-This opens the same raylib window as `watch_random.py`, but after every
-`env.render()` call it also grabs the just-drawn frame with raylib's own
-`take_screenshot()` and stitches the sequence into an animated GIF with
-Pillow afterwards (temporary PNGs are cleaned up automatically). Because
-one PNG is captured per simulated step, the GIF naturally plays back at
-the simulation rate (`SIM_HZ`, 20fps by default) with no wall-clock
-throttling needed.
-
-Useful flags:
-- `--seconds`: clip length (default 5)
-- `--team-size`: squad size to render, same as `watch_random.py`
-- `--fps`: override GIF playback speed if you want it slower/faster than
-  the sim rate
-- `--out`: where to save it — point this at `assets/demo.gif` to update
-  the clip embedded at the top of this README
-
-Needs a real display (it's driving an actual raylib window), so this
-isn't something to run on a headless training server — record locally,
-then commit the resulting `assets/demo.gif`.
+This captures one frame per simulated step via raylib's screenshot
+function and assembles them into an animated GIF. Run it from the
+project root -- frames are written to a temporary folder relative to
+the working directory, since `take_screenshot()` resolves paths
+relative to the process's working directory rather than accepting an
+arbitrary absolute path on all platforms.
 
 ## Training
 
-Training uses RLlib's PPO with the multi-agent API
-(`training/train.py`), running the curriculum end to end:
+Training uses RLlib's multi-agent PPO. Each team shares a single
+policy (`team_0_policy`, `team_1_policy`) across all of its players;
+this is the mechanism that keeps 22-agent training computationally
+tractable, at the cost of per-player specialization within a team.
+
+Training proceeds through a fixed curriculum defined in
+`training/curriculum.py`:
+
+| Stage | Squad size | Target steps |
+|---|---|---|
+| `1v1_ball_chase` | 1 | 2,000,000 |
+| `2v2_basics` | 2 | 3,000,000 |
+| `3v3_passing` | 3 | 4,000,000 |
+| `5v5_shape` | 5 | 6,000,000 |
+| `11v11_full` | 11 | 15,000,000 |
+
+Each stage restores the previous stage's policy checkpoint before
+training continues at the larger squad size. Policy IDs are stable
+across stages, which is what makes this restore valid.
 
 ```bash
-python -m training.train                    # full curriculum from 1v1
-python -m training.train --start-stage 3    # resume from the 5v5 stage
+python -m training.train                    # run the full curriculum
+python -m training.train --start-stage 3     # resume from the 5v5 stage
 ```
 
-Each stage prints `steps` and `reward_mean` per training iteration.
-Rough sizing: the 11v11 stage alone (`training/curriculum.py`) defaults
-to 15M environment steps — plan for a multi-GPU machine or a cloud
-cluster if you want to reach that stage in a reasonable amount of wall
-time; the earlier small-squad stages are cheap and a good place to
-first confirm the pipeline works end to end.
+Training metrics are written to `~/ray_results/` and can be viewed with
+TensorBoard:
 
-RLlib's exact config API has shifted across major versions; `train.py`
-targets Ray 2.9+ as pinned in `requirements.txt`. If a call like
-`.env_runners(...)` doesn't match your installed version, check that
-version's RLlib migration notes — the curriculum/training *logic* won't
-need to change, just the config-builder call names.
-
-### Monitoring training
-RLlib writes results to `~/ray_results/` by default, which you can point
-TensorBoard at:
 ```bash
 tensorboard --logdir ~/ray_results
 ```
-Watch `episode_reward_mean` per policy — it should climb noticeably
-faster in the small-squad stages (there's more goal-scoring signal per
-episode) and more slowly, but still upward, once you reach 11v11.
+
+RLlib's configuration API differs between major versions. This code
+targets Ray 2.9+, as pinned in `requirements.txt`.
+
+## Project Structure
+
+```
+football_env/
+    constants.py        Pitch geometry, physics constants, formations, colors
+    formations.py        Kickoff formation builder for a given squad size
+    entities.py            Player and Ball state
+    physics.py               Movement, ball dynamics, possession, kicks, scoring
+    observations.py          Per-agent observation construction
+    rewards.py                Reward computation
+    environment.py             FootballEnv (pettingzoo.ParallelEnv)
+
+render/
+    renderer.py           raylib rendering
+
+training/
+    curriculum.py         Curriculum stage definitions
+    rllib_wrapper.py        PettingZoo-to-RLlib adapter and policy mapping
+    train.py                  Training entrypoint
+
+scripts/
+    watch_random.py       Render a match with random actions
+    watch_trained.py        Render a match using a trained checkpoint
+    record_demo.py            Record a match to GIF
+
+tests/
+    test_physics.py       Simulation core tests (NumPy only)
+
+assets/
+    demo.gif              Recorded gameplay clip
+```
 
 ## Testing
 
 ```bash
 python -m tests.test_physics
 ```
-Covers acceleration/deceleration, possession pickup radius, kicks, goal
-detection, and out-of-bounds detection. These run with nothing but
-`numpy` installed — deliberately independent of `pettingzoo` / `raylib`
-/ `ray` — so you can validate the simulation core before setting up the
-full stack.
+
+Covers player acceleration/deceleration, possession pickup radius,
+kicks, goal detection, and out-of-bounds detection.
+
+## Limitations
+
+The following are not implemented in the current ruleset:
+
+- Offside
+- Fouls, cards, and physical contact between players
+- Distinct throw-in, corner kick, and goal kick restarts and positioning
+- Stamina or fatigue effects on speed
+- Half-time end swap
 
 ## Roadmap
-- [ ] Tackling / contested possession instead of pure-proximity pickup
-- [ ] Offside detection
-- [ ] Stamina model affecting max speed late in a match
-- [ ] Proper set-piece positioning (corners, throw-ins, free kicks)
-- [ ] TrueSkill-style opponent pool for self-play instead of a single
-      fixed opponent policy (reduces strategy collapse / overfitting to
-      one opponent style)
-- [ ] Replay recording (serialize an episode's positions to disk) so
-      good matches can be replayed without re-running a policy
 
-## Requirements
-
-See `requirements.txt`. Summary: Python 3.10+, `numpy`, `pettingzoo`,
-`gymnasium`, `raylib` (the `pyray` bindings), `ray[rllib]`, `torch`.
+- Contested possession (tackling) instead of proximity-based pickup
+- Offside detection
+- Stamina model
+- Set-piece positioning for restarts
+- Opponent pool for self-play, rather than a single fixed opponent policy
+- Episode replay recording independent of a live policy
