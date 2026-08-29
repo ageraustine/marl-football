@@ -40,7 +40,7 @@ The project includes:
 Requires Python 3.10+.
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/ageraustine/marl-football
 cd marl_football
 pip install -r requirements.txt
 ```
