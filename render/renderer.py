@@ -27,6 +27,14 @@ def _col(rgba):
     return rl.Color(rgba[0], rgba[1], rgba[2], rgba[3])
 
 
+def _v2(point):
+    """draw_line_ex needs an explicit Vector2, not a plain (x, y) tuple --
+    some raylib binding versions auto-convert tuples, some don't. This
+    stays correct either way.
+    """
+    return rl.Vector2(point[0], point[1])
+
+
 class Renderer:
     def __init__(self, team_size: int, width: int = 1280, height: int = 820):
         self.team_size = team_size
@@ -83,8 +91,16 @@ class Renderer:
         h = WORLD_H * self.scale
         rl.draw_rectangle(int(p0[0]), int(p0[1]), int(w), int(h), _col((34, 40, 36, 255)))
         # Faint floodlight glow in the corners for a bit of atmosphere.
+        # Concentric circles with falling alpha instead of draw_circle_gradient:
+        # that call's argument order/count differs across raylib binding
+        # versions (4 vs 5 args), so this portable approach avoids the mismatch.
+        glow_radius = self._len(18)
+        rings = 6
         for cx, cy in [(p0[0], p0[1]), (p0[0] + w, p0[1]), (p0[0], p0[1] + h), (p0[0] + w, p0[1] + h)]:
-            rl.draw_circle_gradient(int(cx), int(cy), self._len(18), _col((255, 250, 220, 35)), _col((255, 250, 220, 0)))
+            for i in range(rings, 0, -1):
+                r = glow_radius * i / rings
+                alpha = int(35 * (1.0 - i / rings) + 4)
+                rl.draw_circle(int(cx), int(cy), r, _col((255, 250, 220, alpha)))
 
     # -- pitch markings -------------------------------------------------------
     def _draw_pitch(self):
@@ -102,7 +118,7 @@ class Renderer:
         self._draw_rect_outline((-C.HALF_LENGTH, C.HALF_WIDTH), (C.HALF_LENGTH, -C.HALF_WIDTH), line, thick)
         p1 = self.world_to_screen((0, C.HALF_WIDTH))
         p2 = self.world_to_screen((0, -C.HALF_WIDTH))
-        rl.draw_line_ex(p1, p2, thick, line)
+        rl.draw_line_ex(_v2(p1), _v2(p2), thick, line)
         center = self.world_to_screen((0, 0))
         rl.draw_circle_lines(int(center[0]), int(center[1]), self._len(9.15), line)
         rl.draw_circle(int(center[0]), int(center[1]), max(2.0, self._len(0.15)), line)
@@ -123,27 +139,27 @@ class Renderer:
         bot_back = self.world_to_screen((back_x, -C.GOAL_HALF_WIDTH))
         net = _col((225, 225, 225, 160))
         post = _col((255, 255, 255, 255))
-        rl.draw_line_ex(top, top_back, 2.0, net)
-        rl.draw_line_ex(bot, bot_back, 2.0, net)
-        rl.draw_line_ex(top_back, bot_back, 2.0, net)
+        rl.draw_line_ex(_v2(top), _v2(top_back), 2.0, net)
+        rl.draw_line_ex(_v2(bot), _v2(bot_back), 2.0, net)
+        rl.draw_line_ex(_v2(top_back), _v2(bot_back), 2.0, net)
         # simple net hatching for a bit of visual richness
         steps = 6
         for i in range(1, steps):
             t = i / steps
             a = (top[0] + (top_back[0] - top[0]) * t, top[1] + (top_back[1] - top[1]) * t)
             b = (bot[0] + (bot_back[0] - bot[0]) * t, bot[1] + (bot_back[1] - bot[1]) * t)
-            rl.draw_line_ex(a, b, 1.0, net)
-        rl.draw_line_ex(top, bot, max(2.5, self._len(0.12)), post)
+            rl.draw_line_ex(_v2(a), _v2(b), 1.0, net)
+        rl.draw_line_ex(_v2(top), _v2(bot), max(2.5, self._len(0.12)), post)
 
     def _draw_rect_outline(self, corner_a, corner_b, color, thick):
         a = self.world_to_screen(corner_a)
         b = self.world_to_screen((corner_b[0], corner_a[1]))
         c = self.world_to_screen(corner_b)
         d = self.world_to_screen((corner_a[0], corner_b[1]))
-        rl.draw_line_ex(a, b, thick, color)
-        rl.draw_line_ex(b, c, thick, color)
-        rl.draw_line_ex(c, d, thick, color)
-        rl.draw_line_ex(d, a, thick, color)
+        rl.draw_line_ex(_v2(a), _v2(b), thick, color)
+        rl.draw_line_ex(_v2(b), _v2(c), thick, color)
+        rl.draw_line_ex(_v2(c), _v2(d), thick, color)
+        rl.draw_line_ex(_v2(d), _v2(a), thick, color)
 
     # -- entities ------------------------------------------------------------
     def _draw_players(self, players, ball):
@@ -166,7 +182,7 @@ class Renderer:
             if speed > 0.4:
                 heading = (p.velocity[0] / speed, p.velocity[1] / speed)
                 tip = self.world_to_screen((p.position[0] + heading[0] * 0.7, p.position[1] + heading[1] * 0.7))
-                rl.draw_line_ex((sx, sy), tip, max(1.5, radius * 0.25), _col((255, 255, 255, 200)))
+                rl.draw_line_ex(_v2((sx, sy)), _v2(tip), max(1.5, radius * 0.25), _col((255, 255, 255, 200)))
 
             role = p.role
             rl.draw_text(role[0], int(sx - 4), int(sy - 6), max(8, int(radius)), _col((255, 255, 255, 230)))

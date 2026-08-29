@@ -8,20 +8,11 @@ Two teams of 11 learn to move, pass, and shoot from scratch through
 self-play — no scripted behavior, no hand-coded tactics. What you see on
 screen is entirely emergent from reward signals and curriculum training.
 
-```
-                    TEAM A   2  -  1   TEAM B          04:12
-      ┌──────────────────────────────────────────────────────┐
-      │░░░░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓░░░│
-      │░░░  ╔═══╗              .                    ╔═══╗  ░░░│
-      │░░░  ║ ● │      ⚫F      |      ⚪F           │ ● ║  ░░░│
-      │░░░  ╚═══╝    ⚫M  ⚫M    |    ⚪M   ⚪M       ╚═══╝  ░░░│
-      │▓▓▓        ⚫D    ⚫D     |      ⚪D    ⚪D          ▓▓▓│
-      │░░░░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓( )▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░│
-      └──────────────────────────────────────────────────────┘
-```
-*(actual rendering is a live, animated raylib window with smooth motion,
-possession rings, direction indicators, and a scoreboard — the above is
-just a text sketch of the layout. Run `scripts/watch_random.py` to see it.)*
+![gameplay demo](assets/demo.gif)
+
+*5 seconds of live raylib rendering — smooth motion, possession rings,
+direction indicators, and a scoreboard. Regenerate this clip yourself
+with `python -m scripts.record_demo` (see "Recording a demo GIF" below).*
 
 ---
 
@@ -62,6 +53,9 @@ python -m tests.test_physics
 # Watch a full 11v11 match with random actions, rendered live in raylib
 python -m scripts.watch_random --team-size 11
 
+# Record a 5-second GIF of it (used for the clip at the top of this README)
+python -m scripts.record_demo --seconds 5 --team-size 11 --out assets/demo.gif
+
 # Train the full curriculum (1v1 -> 11v11) — this takes hours to days
 # depending on hardware; see "Training" below
 python -m training.train
@@ -93,6 +87,10 @@ training/
 scripts/
     watch_random.py           Render a match with random actions (no training needed)
     watch_trained.py           Load a checkpoint and render it playing
+    record_demo.py              Capture N seconds of raylib rendering to a GIF
+
+assets/
+    demo.gif                  The README's gameplay clip (generated, not hand-made)
 
 tests/
     test_physics.py            Fast, dependency-light sanity tests for the sim core
@@ -185,6 +183,32 @@ engine. Known simplifications, so nothing here is a "bug":
 All of these are natural "future work" extensions and the codebase is
 structured (see `physics.py` / `environment.py`) so each one can be
 added independently without a rewrite.
+
+## Recording a demo GIF
+
+```bash
+python -m scripts.record_demo --seconds 5 --team-size 11 --out assets/demo.gif
+```
+
+This opens the same raylib window as `watch_random.py`, but after every
+`env.render()` call it also grabs the just-drawn frame with raylib's own
+`take_screenshot()` and stitches the sequence into an animated GIF with
+Pillow afterwards (temporary PNGs are cleaned up automatically). Because
+one PNG is captured per simulated step, the GIF naturally plays back at
+the simulation rate (`SIM_HZ`, 20fps by default) with no wall-clock
+throttling needed.
+
+Useful flags:
+- `--seconds`: clip length (default 5)
+- `--team-size`: squad size to render, same as `watch_random.py`
+- `--fps`: override GIF playback speed if you want it slower/faster than
+  the sim rate
+- `--out`: where to save it — point this at `assets/demo.gif` to update
+  the clip embedded at the top of this README
+
+Needs a real display (it's driving an actual raylib window), so this
+isn't something to run on a headless training server — record locally,
+then commit the resulting `assets/demo.gif`.
 
 ## Training
 
