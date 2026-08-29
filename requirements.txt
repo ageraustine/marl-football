@@ -1,0 +1,16 @@
+# Core simulation (no training/rendering deps needed just for football_env physics)
+numpy>=1.24
+
+# Environment API
+pettingzoo>=1.24
+gymnasium>=0.29
+
+# Graphics
+raylib>=5.0          # provides the `pyray` module used in render/renderer.py
+
+# Training
+ray[rllib]>=2.9
+torch>=2.1
+
+# Dev / testing
+pytest>=7.4
