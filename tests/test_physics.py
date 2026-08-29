@@ -73,6 +73,93 @@ def test_ball_out_of_bounds():
     assert physics.check_out_of_bounds(ball) is False
 
 
+def test_stamina_drains_while_sprinting():
+    p = make_player()
+    p.velocity = np.array([p.base_max_speed, 0.0], dtype=np.float32)  # full sprint
+    start = p.stamina
+    for _ in range(50):  # 2.5s at 20Hz
+        physics.update_stamina(p, C.DT)
+    assert p.stamina < start, "stamina should drop while sprinting"
+
+
+def test_stamina_recovers_while_resting():
+    p = make_player()
+    p.stamina = 40.0
+    p.velocity = np.zeros(2, dtype=np.float32)  # standing still
+    for _ in range(50):
+        physics.update_stamina(p, C.DT)
+    assert p.stamina > 40.0, "stamina should recover while not sprinting"
+
+
+def test_fatigue_reduces_top_speed():
+    p = make_player()
+    p.stamina = C.STAMINA_MAX
+    fresh_speed = p.max_speed
+    p.stamina = 0.0
+    tired_speed = p.max_speed
+    assert tired_speed < fresh_speed
+    assert tired_speed == pytest_approx(fresh_speed * C.STAMINA_MIN_SPEED_MULT)
+
+
+def pytest_approx(x, tol=1e-4):
+    class _Approx:
+        def __eq__(self, other):
+            return abs(other - x) < tol
+    return _Approx()
+
+
+def test_offside_flagged_when_ahead_of_defenders_and_ball():
+    passer = make_player(x=0.0, y=0.0, team_id=0, agent_id="passer")
+    teammate_ahead = make_player(x=40.0, y=5.0, team_id=0, agent_id="mate_ahead")
+    teammate_deep = make_player(x=-10.0, y=0.0, team_id=0, agent_id="mate_deep")
+    defender_1 = make_player(x=30.0, y=0.0, team_id=1, role=C.DF, agent_id="def1")
+    defender_2 = make_player(x=25.0, y=0.0, team_id=1, role=C.GK, agent_id="gk1")
+    players = {p.agent_id: p for p in [passer, teammate_ahead, teammate_deep, defender_1, defender_2]}
+
+    flagged = physics.offside_flagged_teammates(passer, players)
+    assert "mate_ahead" in flagged
+    assert "mate_deep" not in flagged
+
+
+def test_no_offside_in_own_half():
+    passer = make_player(x=-40.0, y=0.0, team_id=0, agent_id="passer")
+    teammate = make_player(x=-30.0, y=0.0, team_id=0, agent_id="mate")  # ahead of passer, still own half
+    defender = make_player(x=-35.0, y=0.0, team_id=1, agent_id="def1")
+    players = {p.agent_id: p for p in [passer, teammate, defender]}
+
+    flagged = physics.offside_flagged_teammates(passer, players)
+    assert "mate" not in flagged, "own-half positions are never offside"
+
+
+def test_classify_restart_throw_in():
+    ball = Ball(position=np.array([10.0, C.HALF_WIDTH + 0.5], dtype=np.float32), last_touch_team=0)
+    restart_type, defending_team = physics.classify_restart(ball)
+    assert restart_type == C.RESTART_THROW_IN
+    pos, restart_team = physics.restart_ball_state(ball, restart_type, defending_team)
+    assert restart_team == 1  # team 0 touched it last, so team 1 restarts
+    assert abs(pos[1] - C.HALF_WIDTH) < 1e-4
+
+
+def test_classify_restart_corner_when_defender_touched_last():
+    ball = Ball(position=np.array([C.HALF_LENGTH + 0.5, 2.0], dtype=np.float32), last_touch_team=1)
+    restart_type, defending_team = physics.classify_restart(ball)
+    assert restart_type == C.RESTART_CORNER
+    assert defending_team == 1
+    pos, restart_team = physics.restart_ball_state(ball, restart_type, defending_team)
+    assert restart_team == 0  # attackers (team 0) get the corner
+    assert abs(pos[0] - C.HALF_LENGTH) < 1e-4
+
+
+def test_classify_restart_goal_kick_when_attacker_touched_last():
+    ball = Ball(position=np.array([C.HALF_LENGTH + 0.5, 2.0], dtype=np.float32), last_touch_team=0)
+    restart_type, defending_team = physics.classify_restart(ball)
+    assert restart_type == C.RESTART_GOAL_KICK
+    assert defending_team == 1
+    pos, restart_team = physics.restart_ball_state(ball, restart_type, defending_team)
+    assert restart_team == 1  # defending team (1) gets the goal kick
+    assert pos[0] < C.HALF_LENGTH  # pulled back into the field, not on the line
+
+
 def run_all():
     tests = [obj for name, obj in globals().items() if name.startswith("test_")]
     passed = 0

@@ -68,6 +68,22 @@ KICK_POWERS = {
 }
 
 # ---------------------------------------------------------------------------
+# Restart types (out-of-bounds classification)
+# ---------------------------------------------------------------------------
+RESTART_THROW_IN = "throw_in"
+RESTART_CORNER = "corner"
+RESTART_GOAL_KICK = "goal_kick"
+
+# ---------------------------------------------------------------------------
+# Stamina
+# ---------------------------------------------------------------------------
+STAMINA_MAX = 100.0
+STAMINA_DRAIN_RATE = 6.0        # points/sec, at full sprint
+STAMINA_RECOVERY_RATE = 3.0     # points/sec, when jogging or standing
+STAMINA_SPRINT_THRESHOLD = 0.6  # fraction of base max speed above which stamina drains
+STAMINA_MIN_SPEED_MULT = 0.6    # top-speed multiplier at zero stamina
+
+# ---------------------------------------------------------------------------
 # Roles + 4-3-3 kickoff formation, expressed as fractions of half-pitch so the
 # same formation function works for any squad size subset (curriculum).
 # x_frac: 0 = own goal line, 1 = halfway line. Mirrored for the away team.

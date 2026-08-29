@@ -149,10 +149,43 @@ speed to the ball in a direction chosen by the kicking player:
 ### Out of Bounds
 
 If the ball crosses a touchline or goal line without a goal being
-scored, it is placed just inside the boundary and possession is
-awarded to the team that did not touch it last. This single rule
-covers throw-ins, corner kicks, and goal kicks; no stoppage or
-set-piece positioning is simulated.
+scored, play is restarted as one of three types, matching which
+boundary was crossed and who touched it last:
+
+| Restart | Trigger | Restart position | Possession awarded to |
+|---|---|---|---|
+| Throw-in | Ball crosses a touchline | On the touchline, at the point of exit | Team that did not touch it last |
+| Corner kick | Ball crosses a goal line; defending team touched it last | Corner arc nearest the exit point | Attacking team |
+| Goal kick | Ball crosses a goal line; attacking team touched it last | Inside the goal area, on the defending team's side | Defending team |
+
+No stoppage time or opposing-player positioning (e.g. the 9.15 m
+distance on a corner) is simulated; the ball and restart possession are
+placed directly.
+
+### Offside
+
+Offside is evaluated at the moment a player plays a pass. A teammate of
+the passer is in an offside position if, at that moment, they are:
+
+1. In the opponents' half, and
+2. Ahead of both the ball and the second-deepest opponent (goalkeeper
+   included in that count, following the standard practical
+   approximation — the goalkeeper is almost always the deepest player
+   in any case).
+
+If the pass is subsequently received by a flagged teammate, play stops
+and a free kick is awarded to the defending team at the point of
+receipt. The flag is cleared as soon as the ball is next controlled by
+anyone, whether or not an infringement occurred. Offside is evaluated
+only on passes; shots and clearances do not trigger it.
+
+### Stamina
+
+Each player has a stamina value from 0-100, starting at 100. Moving
+above 60% of base top speed drains stamina; moving slower recovers it.
+Top speed scales with current stamina, from 100% at full stamina down
+to 60% at zero — sustained sprinting reduces a player's top speed for
+the remainder of the period until they recover.
 
 ### Movement
 
@@ -175,12 +208,12 @@ Each agent's action is a dictionary:
 
 ### Observation Space
 
-Each agent receives a fixed-length `Box(125,)` vector, independent of
+Each agent receives a fixed-length `Box(126,)` vector, independent of
 squad size:
 
 | Segment | Size | Contents |
 |---|---|---|
-| Self | 7 | Position, velocity, possession flag, time remaining, team id |
+| Self | 8 | Position, velocity, possession flag, time remaining, team id, stamina fraction |
 | Ball | 5 | Relative position, relative velocity, free/owned flag |
 | Goals | 4 | Relative vector to own and opponent goal |
 | Role | 4 | One-hot: GK / DF / MF / FW |
@@ -299,23 +332,26 @@ python -m tests.test_physics
 ```
 
 Covers player acceleration/deceleration, possession pickup radius,
-kicks, goal detection, and out-of-bounds detection.
+kicks, goal detection, out-of-bounds detection, stamina drain and
+recovery, offside detection, and restart classification (throw-in /
+corner / goal kick).
 
 ## Limitations
 
 The following are not implemented in the current ruleset:
 
-- Offside
-- Fouls, cards, and physical contact between players
-- Distinct throw-in, corner kick, and goal kick restarts and positioning
-- Stamina or fatigue effects on speed
-- Half-time end swap
+- Fouls, cards, and physical contact between players (possession is
+  proximity-based, not contested via a tackle action)
+- Opposing-player positioning during restarts (e.g. the 9.15 m distance
+  on a corner or free kick)
+- Stoppage time
+- Half-time end swap (each team defends the same goal for the entire
+  episode)
 
 ## Roadmap
 
 - Contested possession (tackling) instead of proximity-based pickup
-- Offside detection
-- Stamina model
-- Set-piece positioning for restarts
+- Fouls and cards
+- Half-time end swap
 - Opponent pool for self-play, rather than a single fixed opponent policy
 - Episode replay recording independent of a live policy

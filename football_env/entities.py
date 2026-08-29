@@ -20,12 +20,24 @@ class Player:
     position: np.ndarray
     velocity: np.ndarray = field(default_factory=C.np_zeros2)
     home_position: np.ndarray = field(default_factory=C.np_zeros2)
+    stamina: float = C.STAMINA_MAX   # 0-100, drains while sprinting, recovers otherwise
 
     @property
-    def max_speed(self) -> float:
+    def base_max_speed(self) -> float:
+        """Top speed at full stamina."""
         if self.role == C.GK:
             return C.PLAYER_MAX_SPEED * C.GK_MAX_SPEED_MULT
         return C.PLAYER_MAX_SPEED
+
+    @property
+    def max_speed(self) -> float:
+        """Top speed adjusted for current fatigue. Ranges from
+        STAMINA_MIN_SPEED_MULT x base_max_speed (empty tank) up to
+        base_max_speed (full stamina).
+        """
+        fatigue_frac = self.stamina / C.STAMINA_MAX
+        mult = C.STAMINA_MIN_SPEED_MULT + (1.0 - C.STAMINA_MIN_SPEED_MULT) * fatigue_frac
+        return self.base_max_speed * mult
 
 
 @dataclass

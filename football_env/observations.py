@@ -16,9 +16,9 @@ MAX_OPPONENTS = 11
 ROLE_ONE_HOT = {C.GK: 0, C.DF: 1, C.MF: 2, C.FW: 3}
 N_ROLES = 4
 
-# self(7: pos2+vel2+has_ball1+time1+team_id1) + ball(5) + goals(4) + role(4)
+# self(8: pos2+vel2+has_ball1+time1+team_id1+stamina1) + ball(5) + goals(4) + role(4)
 # + teammates(10*5) + opponents(11*5)
-SELF_FEATURES = 7
+SELF_FEATURES = 8
 OBS_SIZE = SELF_FEATURES + 5 + 4 + N_ROLES + MAX_TEAMMATES * 5 + MAX_OPPONENTS * 5
 
 
@@ -37,13 +37,14 @@ def build_observation(agent_id, players, ball, step_count, max_steps) -> np.ndar
 
     chunks = []
 
-    # --- self: position, velocity, has_ball, time_remaining, team_id ---
+    # --- self: position, velocity, has_ball, time_remaining, team_id, stamina ---
     self_chunk = np.concatenate([
         _norm_pos(me.position),
         _norm_vel(me.velocity),
         [1.0 if ball.owner_id == agent_id else 0.0],
         [1.0 - step_count / max_steps],
         [float(me.team_id)],
+        [me.stamina / C.STAMINA_MAX],
     ]).astype(np.float32)
     chunks.append(self_chunk)
 
